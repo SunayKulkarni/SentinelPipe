@@ -13,6 +13,7 @@ import tempfile
 from flask import Blueprint, jsonify, request
 
 from app.analyzer import analyze_file
+from app import vt as vt_module
 
 log = logging.getLogger("macro-analyzer.routes")
 bp = Blueprint("macro", __name__)
@@ -43,6 +44,7 @@ def analyze():
             "error": f"Unsupported extension '{suffix}'. Supported: {sorted(allowed)}",
         }), 400
 
+    vt_api_key: str = os.environ.get("VIRUSTOTAL_API_KEY", "").strip()
     tmp_path = None
     try:
         with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
@@ -50,6 +52,15 @@ def analyze():
             tmp_path = tmp.name
 
         result = analyze_file(tmp_path, original_name=f.filename)
+
+        # ── VirusTotal enrichment (optional — skipped if no API key) ──────────
+        if vt_api_key:
+            try:
+                result["vt"] = vt_module.scan_file(tmp_path, vt_api_key)
+            except Exception as vt_exc:
+                log.warning(f"VT scan failed: {vt_exc}")
+                result["vt"] = {"success": False, "error": str(vt_exc)}
+
         return jsonify({"success": True, **result})
 
     except Exception as exc:
