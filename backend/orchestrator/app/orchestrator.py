@@ -32,6 +32,7 @@ Web-Analyzer (port 5000 internal / 5005 host):
 import logging
 import os
 import re
+import tempfile
 import time
 from typing import Any
 from urllib.parse import urlparse
@@ -207,6 +208,114 @@ def _call_macro(file_path: str, pass_number: int) -> dict[str, Any]:
     return macro_adapter.adapt(raw, pass_number, file_path)
 
 
+# ── Download-and-analyze helpers ──────────────────────────────────────────────
+
+_CONTENT_TYPE_TO_ANALYZER: dict[str, str] = {
+    "application/x-executable":                                             "malware",
+    "application/x-dosexec":                                                "malware",
+    "application/x-msdos-program":                                          "malware",
+    "application/x-elf":                                                    "malware",
+    "application/vnd.microsoft.portable-executable":                        "malware",
+    "application/octet-stream":                                             "malware",
+    "application/x-sharedlib":                                              "malware",
+    "application/x-pie-executable":                                         "malware",
+    "application/msword":                                                   "macro",
+    "application/vnd.ms-excel":                                             "macro",
+    "application/vnd.ms-powerpoint":                                        "macro",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "macro",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":    "macro",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation": "macro",
+    "application/vnd.ms-excel.sheet.macroEnabled.12":                       "macro",
+    "application/rtf":                                                      "macro",
+    "image/png":  "steg", "image/jpeg": "steg", "image/gif":  "steg",
+    "image/bmp":  "steg", "image/webp": "steg", "image/tiff": "steg",
+}
+
+_URL_EXT_TO_ANALYZER: dict[str, str] = {
+    ".exe": "malware", ".dll": "malware", ".elf": "malware", ".bin": "malware",
+    ".so":  "malware", ".out": "malware", ".o":   "malware",
+    ".doc": "macro",   ".docx": "macro",  ".xls": "macro",   ".xlsx": "macro",
+    ".xlsm": "macro",  ".docm": "macro",  ".ppt": "macro",   ".pptx": "macro",
+    ".pptm": "macro",  ".rtf":  "macro",
+    ".png": "steg",    ".jpg":  "steg",   ".jpeg": "steg",
+    ".gif": "steg",    ".bmp":  "steg",
+}
+
+# Content-types that indicate a web page, not a downloadable payload
+_SKIP_CONTENT_TYPES = frozenset({
+    "text/html", "text/plain", "text/css",
+    "text/javascript", "application/javascript", "application/json",
+})
+
+_PAYLOAD_MAX_BYTES = 50 * 1024 * 1024  # 50 MB
+
+
+def _download_payload(url: str) -> tuple[str, str]:
+    """
+    Stream-download *url* to a named temporary file.
+    Returns (temp_file_path, content_type).
+    Raises on HTTP error, timeout, or 50 MB cap.
+    Caller is responsible for os.unlink() when done.
+    """
+    with requests.get(url, stream=True, timeout=30, allow_redirects=True) as r:
+        r.raise_for_status()
+        content_type = (
+            r.headers.get("Content-Type", "application/octet-stream")
+            .split(";")[0].strip().lower()
+        )
+        ext = os.path.splitext(urlparse(url).path)[-1].lower() or ".bin"
+        tmp = tempfile.NamedTemporaryFile(suffix=ext, delete=False)
+        try:
+            downloaded = 0
+            for chunk in r.iter_content(chunk_size=65_536):
+                downloaded += len(chunk)
+                if downloaded > _PAYLOAD_MAX_BYTES:
+                    tmp.close()
+                    os.unlink(tmp.name)
+                    raise ValueError(
+                        f"Download exceeded {_PAYLOAD_MAX_BYTES // (1024 * 1024)} MB cap"
+                    )
+                tmp.write(chunk)
+        finally:
+            tmp.close()
+    return tmp.name, content_type
+
+
+def _select_analyzer_for_download(url: str, content_type: str, file_path: str) -> str:
+    """Pick best analyzer: content-type → URL extension → python-magic fallback."""
+    ct = content_type.split(";")[0].strip().lower()
+    if ct in _CONTENT_TYPE_TO_ANALYZER:
+        return _CONTENT_TYPE_TO_ANALYZER[ct]
+    ext = os.path.splitext(urlparse(url).path)[-1].lower()
+    if ext in _URL_EXT_TO_ANALYZER:
+        return _URL_EXT_TO_ANALYZER[ext]
+    detected, _, _ = classify(file_path)
+    return detected or "malware"
+
+
+def _find_downloadable_urls(result: dict[str, Any], already_downloaded: set[str]) -> list[str]:
+    """
+    Extract HTTP/S URLs from *result* raw_output + findings evidence that
+    haven't been downloaded yet.  URLs with known payload extensions come first.
+    """
+    text = result.get("raw_output", "") + "\n" + " ".join(
+        str(f.get("evidence", ""))
+        for f in result.get("findings", [])
+        if f.get("evidence")
+    )
+    all_urls = list(dict.fromkeys(
+        u.rstrip("/.,;)")
+        for u in re.findall(r"https?://[^\s\"'<>\)\(,\\}]{4,}", text)
+        if u not in already_downloaded
+    ))
+    known_ext = [
+        u for u in all_urls
+        if os.path.splitext(urlparse(u).path)[-1].lower() in _URL_EXT_TO_ANALYZER
+    ]
+    other = [u for u in all_urls if u not in known_ext]
+    return known_ext + other
+
+
 def _call_web(url: str, pass_number: int) -> dict[str, Any]:
     """
     Call the security-critical subset of Web-Analyzer GET endpoints.
@@ -346,6 +455,11 @@ def run_pipeline(user_input: str, max_passes: int = 3) -> FindingsStore:
     tools_run: list[str] = []
     visited: set[tuple[str, str]] = set()
 
+    # Download-and-analyze state (per run)
+    downloaded_urls: set[str] = set()    # URLs already fetched this run
+    temp_downloads:  list[str] = []      # temp file paths — cleaned up on exit
+    pending_source_url: str | None = None  # provenance URL when current_input was downloaded
+
     for pass_num in range(1, max_passes + 1):
         # Deduplicate — never re-run the exact same (tool, input) pair
         visit_key = (current_tool, str(current_input))
@@ -374,6 +488,20 @@ def run_pipeline(user_input: str, max_passes: int = 3) -> FindingsStore:
                 "raw_output": str(e),
             }
 
+        # If current_input is a downloaded payload, always prepend provenance finding
+        if pending_source_url:
+            result["findings"].insert(0, {
+                "type":     "payload_downloaded",
+                "detail":   (
+                    f"File downloaded from: {pending_source_url}. "
+                    "Treat as inherently suspicious regardless of analysis results."
+                ),
+                "severity": "high",
+                "evidence": pending_source_url,
+            })
+            log.info(f"[pipeline] Injected payload_downloaded provenance (source: {pending_source_url!r})")
+            pending_source_url = None
+
         store.append(result)
         tools_run.append(current_tool)
         log.info(
@@ -398,8 +526,37 @@ def run_pipeline(user_input: str, max_passes: int = 3) -> FindingsStore:
         )
 
         if not decision["next_tool"]:
-            log.info("[pipeline] AI signalled termination — ending loop early")
-            break
+            # Before stopping: try to download a payload from URLs found in this pass
+            _continue_pipeline = False
+            if pass_num < max_passes:
+                candidates = _find_downloadable_urls(result, downloaded_urls)
+                for dl_url in candidates:
+                    try:
+                        tmp_path, content_type = _download_payload(dl_url)
+                        if content_type in _SKIP_CONTENT_TYPES:
+                            log.debug(
+                                f"[pipeline] Skipping {dl_url!r} — web content ({content_type})"
+                            )
+                            os.unlink(tmp_path)
+                            continue
+                        downloaded_urls.add(dl_url)
+                        temp_downloads.append(tmp_path)
+                        analyzer = _select_analyzer_for_download(dl_url, content_type, tmp_path)
+                        pending_source_url = dl_url
+                        current_tool  = analyzer
+                        current_input = tmp_path
+                        _continue_pipeline = True
+                        log.info(
+                            f"[pipeline] Downloaded payload from {dl_url!r} "
+                            f"({content_type}) → running {analyzer}"
+                        )
+                        break
+                    except Exception as exc:
+                        log.warning(f"[pipeline] Payload download failed for {dl_url!r}: {exc}")
+            if not _continue_pipeline:
+                log.info("[pipeline] AI signalled termination — ending loop early")
+                break
+            continue  # skip target-normalisation; current_tool/current_input already set
 
         next_input = decision.get("target")
         if not next_input:
@@ -414,6 +571,14 @@ def run_pipeline(user_input: str, max_passes: int = 3) -> FindingsStore:
 
         current_tool  = decision["next_tool"]
         current_input = next_input
+
+    # Clean up temp files from downloaded payloads
+    for tmp in temp_downloads:
+        try:
+            os.unlink(tmp)
+            log.debug(f"[pipeline] Cleaned up temp download: {tmp}")
+        except OSError:
+            pass
 
     log.info(f"[pipeline] Completed — {len(store.get_all())} pass(es) recorded")
     return store
