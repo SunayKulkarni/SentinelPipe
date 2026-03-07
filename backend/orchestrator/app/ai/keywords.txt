@@ -1,0 +1,101 @@
+# SecFlow — keyword list for AI fallback grep
+# Lines beginning with # are comments and are ignored.
+# These keywords are matched (case-insensitive) against raw analyzer output
+# to extract the most relevant lines when output is too large to pass to Gemini in full.
+
+# Network indicators
+http://
+https://
+192.168.
+10.0.
+172.16.
+.onion
+ftp://
+
+# File indicators
+.exe
+.dll
+.elf
+.so
+.bin
+.out
+.msi
+.bat
+.ps1
+.vbs
+.jar
+
+# Malware-specific
+payload
+malware
+trojan
+ransomware
+backdoor
+rootkit
+c2
+c&c
+beacon
+command and control
+dropper
+downloader
+injector
+shellcode
+reverse shell
+keylogger
+botnet
+exfil
+
+# Steg indicators
+embedded
+hidden
+steganograph
+extracted
+lsb
+metadata
+exiftool
+binwalk
+zsteg
+
+# Recon / network
+open port
+open_port
+blacklisted
+threatfox
+talos
+tor exit
+CVE-
+vulnerability
+exposed
+breach
+malicious
+phishing
+ioc
+indicator
+
+# Web vulnerabilities
+injection
+xss
+sqli
+csrf
+ssrf
+rce
+lfi
+rfi
+path traversal
+directory traversal
+misconfiguration
+missing header
+tls
+ssl
+certificate
+
+# Risk signals
+critical
+high severity
+malicious detection
+suspicious
+anomaly
+risk
+threat
+attack
+exploit
