@@ -1,16 +1,56 @@
 # SecFlow — keyword list for AI fallback grep
 # Lines beginning with # are comments and are ignored.
 # These keywords are matched (case-insensitive) against raw analyzer output
-# to extract the most relevant lines when output is too large to pass to Gemini in full.
+# to extract the most relevant lines when output is too large to pass to Gemini.
 
-# Network indicators
+# Network indicators — URLs, protocols
 http://
 https://
+ftp://
+ws://
+wss://
 192.168.
 10.0.
 172.16.
 .onion
-ftp://
+
+# Domain / hostname patterns
+www.
+.com
+.net
+.org
+.io
+.in
+.co
+api.
+cdn.
+login.
+
+# Ghidra / binary string patterns
+STRING
+__libc
+connect(
+socket(
+gethostbyname
+getaddrinfo
+curl_easy
+HttpSend
+InternetOpen
+WinHttpOpen
+send(
+recv(
+bind(
+listen(
+accept(
+
+# TLS / SSL / crypto
+ssl
+tls
+certificate
+cipher
+encrypt
+decrypt
+openssl
 
 # File indicators
 .exe
@@ -48,6 +88,9 @@ exfil
 # Steg indicators
 embedded
 hidden
+lsb
+steghide
+zsteg
 steganograph
 extracted
 lsb
