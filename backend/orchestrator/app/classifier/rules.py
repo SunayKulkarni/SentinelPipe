@@ -20,6 +20,48 @@ RULES: list[tuple] = [
         "steg",
     ),
 
+    # MS Office documents (OLE2 + OpenXML) and RTF → Macro Analyzer
+    # Checked before the malware rule so .xls/.doc aren't caught by octet-stream fallback.
+    # OpenXML (.docx/.xlsx/.pptx etc.) are ZIP archives — detected by MIME or extension.
+    (
+        lambda mime, magic, raw: (
+            mime in {
+                "application/msword",
+                "application/vnd.ms-excel",
+                "application/vnd.ms-powerpoint",
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                "application/vnd.ms-excel.sheet.macroEnabled.12",
+                "application/vnd.ms-word.document.macroEnabled.12",
+                "application/rtf",
+                "text/rtf",
+                "application/vnd.ms-office",
+                "application/x-cfb",  # generic OLE2 Compound File Binary
+            }
+            or any(
+                kw in magic
+                for kw in (
+                    "Composite Document File V2",
+                    "Microsoft Office",
+                    "Microsoft Word",
+                    "Microsoft Excel",
+                    "Microsoft PowerPoint",
+                    "Office Open XML",
+                    "Rich Text Format",
+                )
+            )
+            or (
+                mime == "application/zip"
+                and any(
+                    raw.lower().endswith(ext)
+                    for ext in (".docx", ".xlsx", ".pptx", ".xlsm", ".docm", ".pptm", ".xlsb")
+                )
+            )
+        ),
+        "macro",
+    ),
+
     # Executables / PE / ELF binaries → Malware Analyzer
     (
         lambda mime, magic, raw: mime in (
