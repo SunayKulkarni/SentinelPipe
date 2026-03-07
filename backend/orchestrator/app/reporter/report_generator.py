@@ -121,6 +121,18 @@ def _render_evidence(finding: dict) -> str:
     if not ev:
         return ""
 
+    # Payload download provenance — always-shown amber warning banner
+    if ftype == "payload_downloaded":
+        return (
+            f'<div style="background:#fef3c7;border:1px solid #f59e0b;border-radius:5px;'
+            f'padding:0.4rem 0.75rem;font-size:0.8rem;color:#78350f;margin-top:0.3rem">'
+            f'&#9888;&nbsp;<strong>Downloaded from:</strong>&nbsp;'
+            f'<code style="background:#fde68a;padding:0.1rem 0.35rem;border-radius:3px;'
+            f'font-size:0.75rem;word-break:break-all">{he(ev)}</code>'
+            f'&nbsp;&mdash;&nbsp;<em>treat as inherently suspicious</em>'
+            f'</div>'
+        )
+
     # VT stats / clean result → key-value table
     if ftype in ("malware_detection", "malware_clean") and ev.startswith("{"):
         try:
@@ -406,9 +418,30 @@ details[open] > .ev-sum { color: #1e40af; }
   body { background: white; }
   .hdr    { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   .pass-head { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-  details { open: true; }
-  details > summary { display: none; }
-  .ev-code { max-height: none; overflow: visible; }
+  .ev-code { max-height: none !important; overflow: visible !important; }
+  details        { display: block !important; }
+  details > *    { display: block !important; }
+  details > summary { display: none !important; }
+  .pdf-btn { display: none !important; }
+  .page { padding: 0; }
+}
+
+/* PDF export button (screen only) */
+.pdf-btn {
+  display: inline-flex; align-items: center; gap: 0.35rem;
+  margin-top: 0.55rem;
+  padding: 0.32rem 0.85rem;
+  font-size: 0.72rem; font-weight: 600; letter-spacing: 0.3px;
+  color: #1e293b;
+  background: rgba(255,255,255,0.92);
+  border: 1px solid rgba(255,255,255,0.6);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.15s, box-shadow 0.15s;
+}
+.pdf-btn:hover {
+  background: #fff;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.18);
 }
 @media (max-width: 680px) {
   .cards { grid-template-columns: 1fr 1fr; }
@@ -481,9 +514,9 @@ def _pass_section(p: dict, raw: dict | None) -> str:
 <div class="pass-block">
   <div class="pass-head">
     <div class="pass-left">
-      <span class="pass-badge">{he(str(pnum))}</span>
+      <span class="pass-badge">&#9679;</span>
       <span style="font-size:1rem">{icon}</span>
-      <span class="pass-name">{he(label)}</span>
+      <span class="pass-name">Pass {he(str(pnum))} &mdash; {he(label)}</span>
       <span class="pass-tag">{he(analyzer.upper())}</span>
       {input_chip}
     </div>
@@ -581,6 +614,12 @@ def _render_html(report_data: dict, raw_findings: list[dict], job_id: str) -> st
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>SecFlow Report &mdash; {he(target)}</title>
   <style>{_CSS}</style>
+  <script>
+    function printReport() {{
+      document.querySelectorAll('details').forEach(function(d) {{ d.open = true; }});
+      window.print();
+    }}
+  </script>
 </head>
 <body>
 
@@ -603,6 +642,7 @@ def _render_html(report_data: dict, raw_findings: list[dict], job_id: str) -> st
             style="background:{rc_hex}22;color:{rc_hex};border:1px solid {rc_hex}44">
         {rl}
       </span>
+      <button class="pdf-btn" onclick="printReport()">&#128190;&nbsp;Export PDF</button>
     </div>
   </div>
 </header>
