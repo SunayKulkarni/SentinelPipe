@@ -205,6 +205,7 @@ services:
       - NUMVERIFY_API_KEY=${NUMVERIFY_API_KEY}
       - THREATFOX_API_KEY=${THREATFOX_API_KEY}
       - ipAPI_KEY=${ipAPI_KEY}
+      - VIRUSTOTAL_API_KEY=${VIRUSTOTAL_API_KEY}
     networks:
       - secflow-net
     restart: unless-stopped

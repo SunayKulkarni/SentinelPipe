@@ -16,6 +16,7 @@ const accentMap = {
     cyan: { icon: 'text-neon-cyan', bg: 'bg-neon-cyan/10', border: 'border-neon-cyan/25', hoverBorder: 'hover:border-neon-cyan/40' },
     sky: { icon: 'text-sky-300', bg: 'bg-sky-500/10', border: 'border-sky-400/25', hoverBorder: 'hover:border-sky-400/40' },
     indigo: { icon: 'text-indigo-300', bg: 'bg-indigo-500/10', border: 'border-indigo-400/25', hoverBorder: 'hover:border-indigo-400/40' },
+    amber: { icon: 'text-amber-300', bg: 'bg-amber-500/10', border: 'border-amber-400/25', hoverBorder: 'hover:border-amber-400/40' },
 }
 
 export default function OverviewPage() {

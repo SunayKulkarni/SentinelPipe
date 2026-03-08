@@ -116,6 +116,138 @@ def _ev_code_block(code: str, label: str, lang: str = "") -> str:
     )
 
 
+def _render_vt_evidence(vt: dict) -> str:
+    """Render a VirusTotal scan result dict as a formatted card."""
+    found      = vt.get("found", False)
+    err        = vt.get("error", "")
+    vt_type    = (vt.get("type") or "").lower()        # ip / domain / url
+    query      = vt.get("query", "")
+
+    if not found:
+        icon = "&#128683;"  # no-entry
+        return (
+            f'<div class="vt-not-found">'
+            f'{icon}&nbsp;<strong>VirusTotal:</strong>&nbsp;{he(err or "Not available")}'
+            f'</div>'
+        )
+
+    malicious  = vt.get("malicious", 0)
+    suspicious = vt.get("suspicious", 0)
+    harmless   = vt.get("harmless", 0)
+    undetected = vt.get("undetected", 0)
+    total      = vt.get("total", 0)
+    reputation = vt.get("reputation", 0)
+    engines    = vt.get("engines", [])
+
+    # Detection % for the progress bar
+    flagged  = malicious + suspicious
+    flag_pct = round(flagged / total * 100) if total else 0
+
+    # Reputation badge class
+    if reputation < -10:
+        rep_cls, rep_icon = "vt-rep-bad",  "&#9888;"
+    elif reputation > 10:
+        rep_cls, rep_icon = "vt-rep-good", "&#10003;"
+    else:
+        rep_cls, rep_icon = "vt-rep-neu",  "&#9651;"
+
+    # Type label
+    type_labels = {"ip": "IP Address", "domain": "Domain", "url": "URL"}
+    type_label  = type_labels.get(vt_type, vt_type.upper())
+
+    # Stats pills
+    m_cls = "vt-pill vt-pill-malicious"  if malicious  > 0 else "vt-pill vt-pill-undetected"
+    s_cls = "vt-pill vt-pill-suspicious" if suspicious > 0 else "vt-pill vt-pill-undetected"
+
+    stats_row = (
+        f'<div class="vt-stats-row">'
+        f'<span class="{m_cls}">&#128683; Malicious: {malicious}</span>'
+        f'<span class="{s_cls}">&#9888; Suspicious: {suspicious}</span>'
+        f'<span class="vt-pill vt-pill-harmless">&#10003; Harmless: {harmless}</span>'
+        f'<span class="vt-pill vt-pill-undetected">&#8212; Undetected: {undetected}</span>'
+        f'<span class="vt-rep-badge {rep_cls}">{rep_icon} Reputation: {reputation}</span>'
+        f'</div>'
+    )
+
+    # Progress bar (flagged %)
+    bar_color = "#dc2626" if malicious > 0 else "#ea580c" if suspicious > 0 else "#16a34a"
+    progress = (
+        f'<div class="vt-progress-track">'
+        f'<div class="vt-progress-fill" style="width:{flag_pct}%;background:{bar_color}"></div>'
+        f'</div>'
+        f'<div style="font-size:0.68rem;color:#64748b;margin-bottom:0.65rem">'
+        f'{flag_pct}% flagged by {total} engines'
+        f'</div>'
+    )
+
+    # Type-specific metadata
+    meta_rows = ""
+    if vt_type == "ip":
+        for label, val in [
+            ("Country",  vt.get("country", "")),
+            ("AS Owner", vt.get("as_owner", "")),
+            ("ASN",      str(vt.get("asn", "")) if vt.get("asn") else ""),
+            ("Network",  vt.get("network", "")),
+        ]:
+            if val:
+                meta_rows += (
+                    f'<tr><td>{he(label)}</td>'
+                    f'<td><code style="font-size:0.78rem">{he(val)}</code></td></tr>'
+                )
+    elif vt_type == "domain":
+        cats = vt.get("categories", {})
+        cat_str = ", ".join(set(cats.values())) if cats else ""
+        for label, val in [
+            ("Registrar",  vt.get("registrar", "")),
+            ("Categories", cat_str),
+        ]:
+            if val:
+                meta_rows += (
+                    f'<tr><td>{he(label)}</td>'
+                    f'<td>{he(val)}</td></tr>'
+                )
+    elif vt_type == "url":
+        final = vt.get("final_url", "")
+        if final and final != vt.get("query", ""):
+            meta_rows += (
+                f'<tr><td>Final URL</td>'
+                f'<td style="word-break:break-all;font-size:0.75rem">{he(final)}</td></tr>'
+            )
+
+    meta_block = (
+        f'<table class="vt-meta-table">{meta_rows}</table>'
+    ) if meta_rows else ""
+
+    # Engine detection chips
+    engines_block = ""
+    if engines:
+        chips = "".join(
+            f'<span class="vt-engine-chip{" suspicious" if e["category"] == "suspicious" else ""}">'
+            f'{he(e["engine"])}: {he(str(e["result"] or e["category"]))}'
+            f'</span>'
+            for e in engines
+        )
+        engines_block = (
+            f'<div class="vt-engine-header">Detected by</div>'
+            f'<div class="vt-engines-grid">{chips}</div>'
+        )
+
+    return (
+        f'<div class="vt-card">'
+        f'<div class="vt-header">'
+        f'<span class="vt-brand">&#128737;&nbsp;VirusTotal</span>'
+        f'<span class="vt-type-badge">{he(type_label)}</span>'
+        f'</div>'
+        f'<div class="vt-body">'
+        f'{stats_row}'
+        f'{progress}'
+        f'{meta_block}'
+        f'{engines_block}'
+        f'</div>'
+        f'</div>'
+    )
+
+
 def _render_evidence(finding: dict) -> str:
     """Return pre-rendered HTML for a finding's evidence field."""
     ftype = finding.get("type", "")
@@ -177,6 +309,15 @@ def _render_evidence(finding: dict) -> str:
     # XLM / Excel 4 macro deobfuscation output
     if ftype == "macro_xlm":
         return _ev_code_block(ev, "Excel 4 (XLM) Macros", "")
+
+    # VirusTotal scan result → rich VT card
+    if ftype in ("virustotal_scan", "virustotal_unavailable") and ev.startswith("{"):
+        try:
+            vt = json.loads(ev)
+            if isinstance(vt, dict):
+                return _render_vt_evidence(vt)
+        except (json.JSONDecodeError, ValueError):
+            pass
 
     # Generic JSON object → key-value table
     if ev.startswith("{"):
@@ -530,6 +671,88 @@ details[open] > .ev-sum { color: #1e40af; }
   letter-spacing: 0.4px; color: #b45309; margin-bottom: 0.3rem;
 }
 
+/* VirusTotal evidence card */
+.vt-card {
+  border: 1px solid #e2e8f0; border-radius: 8px;
+  overflow: hidden; margin-top: 0.5rem;
+  box-shadow: 0 1px 4px rgba(0,0,0,.07);
+}
+.vt-header {
+  background: linear-gradient(90deg, #1a56db 0%, #1e40af 100%);
+  padding: 0.6rem 1rem; display: flex; align-items: center;
+  justify-content: space-between; gap: 0.6rem; flex-wrap: wrap;
+}
+.vt-brand {
+  font-size: 0.8rem; font-weight: 800; color: white;
+  letter-spacing: 0.2px;
+}
+.vt-type-badge {
+  background: rgba(255,255,255,.18); border: 1px solid rgba(255,255,255,.3);
+  border-radius: 4px; padding: 0.07rem 0.45rem;
+  font-size: 0.6rem; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.5px; color: white;
+}
+.vt-body { padding: 0.85rem 1rem; }
+.vt-stats-row {
+  display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.75rem;
+}
+.vt-pill {
+  display: inline-flex; align-items: center; gap: 0.3rem;
+  padding: 0.22rem 0.65rem; border-radius: 20px;
+  font-size: 0.72rem; font-weight: 800; border: 1px solid;
+}
+.vt-pill-malicious  { background:#fef2f2; color:#b91c1c; border-color:#fecaca; }
+.vt-pill-suspicious { background:#fff7ed; color:#c2410c; border-color:#fed7aa; }
+.vt-pill-harmless   { background:#f0fdf4; color:#15803d; border-color:#bbf7d0; }
+.vt-pill-undetected { background:#f8fafc; color:#64748b; border-color:#e2e8f0; }
+.vt-rep-badge {
+  display: inline-flex; align-items: center; gap: 0.25rem;
+  padding: 0.18rem 0.55rem; border-radius: 20px;
+  font-size: 0.7rem; font-weight: 700; border: 1px solid;
+}
+.vt-rep-bad  { background:#fef2f2; color:#b91c1c; border-color:#fecaca; }
+.vt-rep-good { background:#f0fdf4; color:#15803d; border-color:#bbf7d0; }
+.vt-rep-neu  { background:#f8fafc; color:#64748b; border-color:#e2e8f0; }
+.vt-progress-track {
+  background: #e2e8f0; border-radius: 4px; height: 6px;
+  overflow: hidden; margin: 0.3rem 0 0.75rem;
+}
+.vt-progress-fill {
+  height: 100%; border-radius: 4px;
+  background: linear-gradient(90deg, #dc2626, #ea580c);
+  transition: width 0.3s;
+}
+.vt-meta-table {
+  width: 100%; border-collapse: collapse;
+  font-size: 0.77rem; margin-bottom: 0.7rem;
+}
+.vt-meta-table td { padding: 0.25rem 0.5rem; }
+.vt-meta-table td:first-child {
+  font-weight: 700; color: #64748b;
+  font-size: 0.63rem; text-transform: uppercase;
+  letter-spacing: 0.4px; white-space: nowrap; width: 1%;
+}
+.vt-engine-header {
+  font-size: 0.65rem; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.5px; color: #64748b; margin-bottom: 0.35rem;
+}
+.vt-engines-grid {
+  display: flex; flex-wrap: wrap; gap: 0.35rem;
+}
+.vt-engine-chip {
+  background: #fef2f2; border: 1px solid #fecaca;
+  border-radius: 4px; padding: 0.15rem 0.45rem;
+  font-size: 0.68rem; font-family: monospace; color: #991b1b;
+}
+.vt-engine-chip.suspicious {
+  background: #fff7ed; border-color: #fed7aa; color: #9a3412;
+}
+.vt-not-found {
+  background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px;
+  padding: 0.5rem 0.85rem; font-size: 0.8rem; color: #64748b;
+  display: flex; align-items: center; gap: 0.5rem; margin-top: 0.4rem;
+}
+
 /* Print */
 @media print {
   body { background: white; }
@@ -566,7 +789,125 @@ details[open] > .ev-sum { color: #1e40af; }
   .cards { grid-template-columns: 1fr 1fr; }
   .pass-input { display: none; }
 }
+/* ── Analysis Pipeline Chain ────────────────────────────────────────── */
+.pipeline-wrap { overflow-x: auto; padding: 0.1rem 0 0.5rem; }
+.pipeline-chain {
+  display: flex;
+  align-items: flex-start;
+  flex-wrap: nowrap;
+  min-width: max-content;
+  padding: 0.75rem 0.25rem;
+  gap: 0;
+}
+.pipeline-node {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.3rem;
+  min-width: 76px;
+}
+.pipeline-bubble {
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.35rem;
+  border: 2px solid transparent;
+  transition: transform 0.15s, box-shadow 0.15s;
+}
+.pipeline-bubble:hover { transform: scale(1.1); box-shadow: 0 0 0 4px rgba(255,255,255,0.06); }
+.pipeline-node-label {
+  font-size: 0.66rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #94a3b8;
+  text-align: center;
+  max-width: 74px;
+  line-height: 1.2;
+}
+.pipeline-node-pass {
+  font-size: 0.6rem;
+  color: #475569;
+  text-align: center;
+  min-height: 0.9rem;
+}
+.pipeline-arrow {
+  flex: 0 0 auto;
+  align-self: center;
+  padding: 0 0.3rem;
+  margin-bottom: 1.5rem;
+  color: #334155;
+  font-size: 1.25rem;
+  line-height: 1;
+}
+.pn-input    { background: #1e293b; border-color: #475569; }
+.pn-malware  { background: #450a0a; border-color: #dc2626; }
+.pn-recon    { background: #0c1a2e; border-color: #2563eb; }
+.pn-web      { background: #042f2e; border-color: #0d9488; }
+.pn-steg     { background: #1e1b4b; border-color: #7c3aed; }
+.pn-url      { background: #1c1917; border-color: #d97706; }
+.pn-macro    { background: #1a1205; border-color: #ca8a04; }
+.pn-complete { background: #052e16; border-color: #16a34a; }
 """
+
+
+# ── Analysis Pipeline Chain renderer ─────────────────────────────────────────
+
+_ANALYZER_BUBBLE_CLASSES = {"malware", "recon", "web", "steg", "url", "macro"}
+
+
+def _render_pipeline_chain(passes: list[dict]) -> str:
+    """Render an arrow-based diagram showing the analyzer call sequence."""
+    if not passes:
+        return ""
+
+    ordered = sorted(passes, key=lambda p: p.get("pass_number", p.get("pass", 1)))
+
+    parts: list[str] = []
+
+    # INPUT node
+    parts.append(
+        '<div class="pipeline-node">'
+        '<div class="pipeline-bubble pn-input">&#128229;</div>'
+        '<div class="pipeline-node-label">Input</div>'
+        '<div class="pipeline-node-pass">&nbsp;</div>'
+        '</div>'
+    )
+
+    for p in ordered:
+        pnum     = p.get("pass_number", p.get("pass", 1))
+        analyzer = (p.get("analyzer") or "unknown").lower()
+        icon     = _ANALYZER_ICONS.get(analyzer, "&#128295;")
+        label    = _ANALYZER_LABELS.get(analyzer, analyzer.title())
+        bcls     = f"pn-{analyzer}" if analyzer in _ANALYZER_BUBBLE_CLASSES else "pn-input"
+
+        parts.append('<div class="pipeline-arrow">&#8594;</div>')
+        parts.append(
+            f'<div class="pipeline-node">'
+            f'<div class="pipeline-bubble {bcls}">{icon}</div>'
+            f'<div class="pipeline-node-label">{he(label)}</div>'
+            f'<div class="pipeline-node-pass">Pass {pnum}</div>'
+            f'</div>'
+        )
+
+    # REPORT node
+    parts.append('<div class="pipeline-arrow">&#8594;</div>')
+    parts.append(
+        '<div class="pipeline-node">'
+        '<div class="pipeline-bubble pn-complete">&#9989;</div>'
+        '<div class="pipeline-node-label">Report</div>'
+        '<div class="pipeline-node-pass">&nbsp;</div>'
+        '</div>'
+    )
+
+    return (
+        '<div class="pipeline-wrap">'
+        '<div class="pipeline-chain">' + "".join(parts) + '</div>'
+        '</div>'
+    )
 
 
 # ── Threat Intel HTML renderers ───────────────────────────────────────────────
@@ -990,6 +1331,14 @@ def _render_html(
     summary = he(report_data.get("summary") or "No summary available.")
     total_p = report_data.get("total_passes", 0)
 
+    # ── Pipeline chain diagram ─────────────────────────────────────────────────
+    pipeline_chain_section = (
+        f'<section>'
+        f'<div class="sec-head">Analysis Pipeline</div>'
+        f'{_render_pipeline_chain(report_data.get("passes", []))}'
+        f'</section>'
+    )
+
     # ── Threat Intel sections ──────────────────────────────────────────────────
     # ts_top_section  → sits right after Executive Summary (top of report)
     # yara_sig_section → sits after Recommendations (bottom of report)
@@ -1090,6 +1439,8 @@ def _render_html(
     <div class="sec-head">Executive Summary</div>
     <div class="summary-box">{summary}</div>
   </section>
+
+  {pipeline_chain_section}
 
   {ts_top_section}
 

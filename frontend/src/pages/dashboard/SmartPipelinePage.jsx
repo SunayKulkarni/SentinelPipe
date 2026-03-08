@@ -455,7 +455,7 @@ export default function SmartPipelinePage() {
                                     <div className="text-sm text-foreground/50 mb-1">Drop one evidence file here</div>
                                     <div className="text-[10px] text-foreground/25 font-mono mb-5">CLICK TO BROWSE · ALL FORMATS ACCEPTED</div>
                                     <div className="flex flex-wrap gap-1 justify-center">
-                                        {['EXE', 'DLL', 'PNG', 'JPG', 'PDF', 'BIN', 'WAV', 'ELF', 'LOG'].map(ext => (
+                                        {['DOCM', 'XLSM', 'PPTM', 'DOCX', 'XLSX', 'EXE', 'DLL', 'PNG', 'JPG', 'BIN', 'LOG'].map(ext => (
                                             <span key={ext} className="text-[8px] font-mono px-1.5 py-0.5 rounded bg-white/[0.03] border border-white/[0.04] text-foreground/20">
                                                 .{ext}
                                             </span>

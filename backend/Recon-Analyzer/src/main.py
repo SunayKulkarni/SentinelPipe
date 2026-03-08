@@ -12,6 +12,7 @@ from attack.talos import talos
 from attack.threatfox import threatfox
 from attack.tor import tor
 from attack.tranco import tranco
+from attack.virustotal import virustotal_domain, virustotal_ip, virustotal_url
 from osint.xposedornot import checkEmail
 from osint.phone import validate_phone_number
 from osint.username import sagemode_wrapper
@@ -33,6 +34,7 @@ API_PREFIX = '/api/Recon-Analyzer'
 
 IP_REGEX = r'^((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$'
 URL_REGEX = r'^([a-zA-Z0-9-]+\.)*[a-zA-Z0-9-]+\.[a-zA-Z]{2,}$'
+HTTP_URL_REGEX = r'^https?://[^\s]+'
 EMAIL_REGEX = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
 PHONE_REGEX = r'^\+?[0-9]\d{1,14}$'
 
@@ -76,6 +78,14 @@ def scan():
     ip_to_scan = None
     url_to_scan = None
 
+    # HTTP/HTTPS URL — run VirusTotal URL scan only
+    if re.match(HTTP_URL_REGEX, ip_or_domain):
+        logger.info(f"Detected HTTP URL: {ip_or_domain}")
+        results = {"query": ip_or_domain}
+        results["virustotal"] = virustotal_url(ip_or_domain)
+        logger.info(f"URL scan complete for {ip_or_domain}")
+        return jsonify(results)
+
     if re.match(IP_REGEX, ip_or_domain):
         ip_to_scan = ip_or_domain
         logger.info(f"Detected IP address: {ip_to_scan}")
@@ -98,6 +108,10 @@ def scan():
         results["ipapi"] = ipapi(ip_to_scan)
         results["talos"] = talos(ip_to_scan)
         results["tor"] = tor(ip_to_scan)
+        # Only run VT on the IP when there is no domain — for domain queries
+        # virustotal_domain() below gives richer context, so skip the IP call.
+        if not url_to_scan:
+            results["virustotal"] = virustotal_ip(ip_to_scan)
 
     if url_to_scan:
         logger.info(f"Running domain-based checks for {url_to_scan}")
@@ -105,6 +119,7 @@ def scan():
         threatfox_result = threatfox(url_to_scan)
         if threatfox_result:
             results["threatfox"] = threatfox_result
+        results["virustotal"] = virustotal_domain(url_to_scan)
 
     logger.info(f"Scan complete for {ip_or_domain}")
     return jsonify(results)
